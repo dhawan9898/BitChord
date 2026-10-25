@@ -24,8 +24,13 @@ plugins {
  */
 
 val signing = Properties().apply {
-    val file = rootProject.file("keystore.properties")
-    if (file.exists()) file.inputStream().use { load(it) }
+    // A personal keystore.properties (gitignored) wins; otherwise the project's
+    // own signing/keystore.properties, which is committed so CI and every
+    // checkout sign with the same key.
+    val file = listOf("keystore.properties", "signing/keystore.properties")
+        .map { rootProject.file(it) }
+        .firstOrNull { it.exists() }
+    file?.inputStream()?.use { load(it) }
 }
 
 val betaSuffix = rootProject.extra["bitchordBetaSuffix"] as String
@@ -68,6 +73,7 @@ android {
         if (store != null && store.exists()) {
             create("release") {
                 storeFile = store
+                if (store.extension == "p12") storeType = "pkcs12"
                 storePassword = signing.getProperty("storePassword")
                 keyAlias = signing.getProperty("keyAlias")
                 keyPassword = signing.getProperty("keyPassword")

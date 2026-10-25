@@ -42,18 +42,18 @@ buildscript {
  * release tag's alone.
  */
 /*
- * CI builds (BITCHORD_BUILD_NUMBER is the workflow run number) stamp every push
- * to main with its own version so each one is a distinct, installable update:
- * the name gains a fourth part ("1.8.1" -> "1.8.1.57"), and the code is the base
- * code times 10000 plus the run number, which rises with every run and still
- * outranks everything built before it if the base is bumped by hand. A local
- * build has no run number and keeps the plain base values below.
+ * CI builds stamp every push to main with its own version. BITCHORD_BUILD_NUMBER
+ * is how many releases of this base version were published before: 0 for the
+ * first ("1.0"), then "1.0.1", "1.0.2", ... The code rises with it
+ * (base code x 10000 + number), so every build installs as an update over the
+ * last. A local build has no number and keeps the plain base values.
  */
-val baseVersionCode = 29
-val baseVersionName = "1.8.1"
+val baseVersionCode = 1
+val baseVersionName = "1.0"
 val ciBuildNumber = System.getenv("BITCHORD_BUILD_NUMBER")?.toIntOrNull()
-extra["bitchordVersionCode"] = if (ciBuildNumber != null) baseVersionCode * 10000 + ciBuildNumber else baseVersionCode
-extra["bitchordVersionName"] = if (ciBuildNumber != null) "$baseVersionName.$ciBuildNumber" else baseVersionName
+extra["bitchordVersionCode"] = baseVersionCode * 10000 + (ciBuildNumber ?: 0)
+extra["bitchordVersionName"] =
+    if (ciBuildNumber != null && ciBuildNumber > 0) "$baseVersionName.$ciBuildNumber" else baseVersionName
 
 /*
  * Bump this by hand before cutting each sideloaded test build ("beta2",

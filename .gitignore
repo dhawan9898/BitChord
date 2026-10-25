@@ -50,3 +50,7 @@ AGENTS.md
 
 # Claude Code session files (launch configs, worktrees)
 .claude/
+
+# The project's own signing key is committed on purpose (see signing/)
+!signing/keystore.properties
+!signing/*.p12

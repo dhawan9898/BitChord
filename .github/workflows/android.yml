@@ -1,9 +1,10 @@
 name: Android Release APK
 
 # Every push to main builds one signed arm64 APK and publishes it as a new
-# GitHub release, v<base version>.<run number> (for example v1.8.1.57). The
-# base version lives in build.gradle.kts; the run number is added by CI so
-# each push is a distinct, installable update.
+# GitHub release: v1.0 first, then v1.0.1, v1.0.2, ... The base version lives
+# in build.gradle.kts (baseVersionName); the number after it is how many
+# releases of that base already exist, so each push is a distinct update.
+# Signing uses the keystore committed under signing/ - no secrets needed.
 on:
   push:
     branches: [main]
@@ -40,35 +41,13 @@ jobs:
         distribution: 'temurin'
         cache: gradle
 
-    # An APK without the real key is unsigned and cannot be installed, so say
-    # so up front instead of publishing a release nobody can use.
-    - name: Check signing secrets
-      env:
-        KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-        KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-        KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-        KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-      run: |
-        for v in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
-          if [ -z "${!v}" ]; then
-            echo "::error::Repository secret $v is not set (Settings > Secrets and variables > Actions)."
-            exit 1
-          fi
-        done
-
-    - name: Setup Secrets (Keystore & local.properties)
+    # LASTFM_*/LISTEN_TOGETHER_SERVER are optional: when the repository has no
+    # such secrets the values are blank and those two features stay off.
+    - name: Write local.properties
       run: |
         echo "LASTFM_API_KEY=${{ secrets.LASTFM_API_KEY }}" > local.properties
         echo "LASTFM_SECRET=${{ secrets.LASTFM_SECRET }}" >> local.properties
         echo "LISTEN_TOGETHER_SERVER=${{ secrets.LISTEN_TOGETHER_SERVER }}" >> local.properties
-
-        echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > bitchord-release.jks
-        {
-          echo "storeFile=bitchord-release.jks"
-          echo "storePassword=${{ secrets.KEYSTORE_PASSWORD }}"
-          echo "keyAlias=${{ secrets.KEY_ALIAS }}"
-          echo "keyPassword=${{ secrets.KEY_PASSWORD }}"
-        } > keystore.properties
 
     - name: Compute version
       run: |
@@ -77,8 +56,13 @@ jobs:
           echo "::error::Could not read baseVersionName from build.gradle.kts"
           exit 1
         fi
-        echo "VERSION=${BASE}.${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
-        echo "Building ${BASE}.${GITHUB_RUN_NUMBER}"
+        # Releases of this base so far: tags "v<base>" and "v<base>.<n>".
+        PATTERN="^v${BASE//./\\.}(\\.[0-9]+)?$"
+        N=$(git tag -l 'v*' | grep -Ec "$PATTERN" || true)
+        if [ "$N" -eq 0 ]; then VERSION="$BASE"; else VERSION="${BASE}.${N}"; fi
+        echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+        echo "BUILD_NUMBER=${N}" >> "$GITHUB_ENV"
+        echo "Building ${VERSION} (release #$((N + 1)) of ${BASE})"
 
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
@@ -86,7 +70,7 @@ jobs:
     # build.gradle.kts reads BITCHORD_BUILD_NUMBER to stamp the version and code.
     - name: Build Signed Prod Release APK
       env:
-        BITCHORD_BUILD_NUMBER: ${{ github.run_number }}
+        BITCHORD_BUILD_NUMBER: ${{ env.BUILD_NUMBER }}
       run: ./gradlew assembleProdRelease
 
     # Exactly one phone APK (arm64-v8a, no ABI splits, no universal build).
@@ -125,23 +109,37 @@ jobs:
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        PREVIOUS=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)
-        if [ -n "$PREVIOUS" ]; then
-          RANGE="${PREVIOUS}..HEAD"
+        if [ "$BUILD_NUMBER" -eq 0 ]; then
+          {
+            echo "## BitChord v${VERSION}"
+            echo
+            echo "First release of this build, tuned for a Galaxy S24 Ultra (arm64, Android 14 or newer)."
+            echo
+            echo "### What's in it"
+            echo "- **One APK, arm64 only.** No per-CPU splits and no universal build, so the download is far smaller."
+            echo "- **System font.** Text, the Replay poster and the home-screen widgets use the phone's own sans-serif; no font files are bundled."
+            echo "- **Smaller app.** Release builds shrink unused resources, and the older-Android code paths are dropped."
+            echo "- **Same features, same animations and glass effects** as before."
+            echo "- **Updates from this repository.** The in-app updater now reads these releases, and every push to main publishes a new one (v1.0.1, v1.0.2, ...)."
+            echo
+            echo "### Install"
+            echo "Download **BitChord-v${VERSION}.apk** below and install it. If the original BitChord is installed, uninstall it first: this build is signed with a different key."
+          } > release-notes.md
         else
-          RANGE="-n 15"
+          PREVIOUS=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)
+          if [ -n "$PREVIOUS" ]; then RANGE="${PREVIOUS}..HEAD"; else RANGE="-n 15"; fi
+          {
+            echo "## BitChord v${VERSION}"
+            echo
+            echo "Built from commit \`${GITHUB_SHA::7}\` on $(date -u +'%Y-%m-%d %H:%M UTC')."
+            echo
+            echo "### Changes"
+            git log $RANGE --no-merges --pretty='- %s' | head -n 30
+            echo
+            echo "### Install"
+            echo "Download **BitChord-v${VERSION}.apk** below and install it over the previous version, or use the in-app update prompt."
+          } > release-notes.md
         fi
-        {
-          echo "## BitChord v${VERSION}"
-          echo
-          echo "Built from commit \`${GITHUB_SHA::7}\` on $(date -u +'%Y-%m-%d %H:%M UTC')."
-          echo
-          echo "### Changes"
-          git log $RANGE --no-merges --pretty='- %s' | head -n 30
-          echo
-          echo "### Install"
-          echo "Download **BitChord-v${VERSION}.apk** below (arm64 phones, Android 14 or newer) and install it over the previous version, or use the in-app update prompt."
-        } > release-notes.md
         gh release create "v${VERSION}" "build-output/BitChord-v${VERSION}.apk" \
           --target "$GITHUB_SHA" \
           --title "BitChord v${VERSION}" \
