@@ -1,9 +1,27 @@
 name: Android Release APK
 
+# Every push to main builds one signed arm64 APK and publishes it as a new
+# GitHub release, v<base version>.<run number> (for example v1.8.1.57). The
+# base version lives in build.gradle.kts; the run number is added by CI so
+# each push is a distinct, installable update.
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'web/**'
+      - 'backend/**'
+      - 'docs/**'
   workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Never cancel a run half way through a release: a tag without its APK is worse
+# than a queued run.
+concurrency:
+  group: android-release
+  cancel-in-progress: false
 
 jobs:
   build-prod-release:
@@ -12,6 +30,8 @@ jobs:
     steps:
     - name: Checkout Repository
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 0   # the release notes list commits since the previous release
 
     - name: Set up JDK 17
       uses: actions/setup-java@v4
@@ -19,6 +39,22 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
         cache: gradle
+
+    # An APK without the real key is unsigned and cannot be installed, so say
+    # so up front instead of publishing a release nobody can use.
+    - name: Check signing secrets
+      env:
+        KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+      run: |
+        for v in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+          if [ -z "${!v}" ]; then
+            echo "::error::Repository secret $v is not set (Settings > Secrets and variables > Actions)."
+            exit 1
+          fi
+        done
 
     - name: Setup Secrets (Keystore & local.properties)
       run: |
@@ -34,23 +70,80 @@ jobs:
           echo "keyPassword=${{ secrets.KEY_PASSWORD }}"
         } > keystore.properties
 
+    - name: Compute version
+      run: |
+        BASE=$(grep -oP 'val baseVersionName = "\K[0-9.]+' build.gradle.kts)
+        if [ -z "$BASE" ]; then
+          echo "::error::Could not read baseVersionName from build.gradle.kts"
+          exit 1
+        fi
+        echo "VERSION=${BASE}.${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
+        echo "Building ${BASE}.${GITHUB_RUN_NUMBER}"
+
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
 
+    # build.gradle.kts reads BITCHORD_BUILD_NUMBER to stamp the version and code.
     - name: Build Signed Prod Release APK
+      env:
+        BITCHORD_BUILD_NUMBER: ${{ github.run_number }}
       run: ./gradlew assembleProdRelease
+
+    # Exactly one phone APK (arm64-v8a, no ABI splits, no universal build).
+    - name: Collect the APK
+      run: |
+        mapfile -t APKS < <(ls app/build/outputs/apk/prod/release/*.apk)
+        if [ "${#APKS[@]}" -ne 1 ]; then
+          echo "::error::Expected exactly one APK, found ${#APKS[@]}: ${APKS[*]}"
+          exit 1
+        fi
+        BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+        "$BT/apksigner" verify --print-certs "${APKS[0]}"
+        mkdir -p build-output
+        cp "${APKS[0]}" "build-output/BitChord-v${VERSION}.apk"
+        ls -lh build-output
 
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: bitchord-prod-release-signed
-        path: app/build/outputs/apk/prod/release/*.apk
+        name: BitChord-v${{ env.VERSION }}
+        path: build-output/BitChord-v${{ env.VERSION }}.apk
+        retention-days: 30
 
-    # Built by the same assembleProdRelease, with the same key. The watch app
-    # only pairs with a phone app signed by the same key, so a prod watch APK
-    # for these phone builds can only come from here, never a local build.
+    # Built by the same assembleProdRelease, with the same key. The phone APK
+    # already carries the watch app inside it; this copy is kept as a workflow
+    # artifact only (it is not a release asset, so a release stays one APK).
     - name: Upload Wear OS APK Artifact
       uses: actions/upload-artifact@v4
       with:
         name: bitchord-wear-prod-release-signed
         path: wearos/build/outputs/apk/prod/release/*.apk
+
+    # One release per push, tagged on the exact commit that was built. The
+    # in-app updater reads the latest release and its BitChord-*.apk asset.
+    - name: Publish GitHub Release
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        PREVIOUS=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)
+        if [ -n "$PREVIOUS" ]; then
+          RANGE="${PREVIOUS}..HEAD"
+        else
+          RANGE="-n 15"
+        fi
+        {
+          echo "## BitChord v${VERSION}"
+          echo
+          echo "Built from commit \`${GITHUB_SHA::7}\` on $(date -u +'%Y-%m-%d %H:%M UTC')."
+          echo
+          echo "### Changes"
+          git log $RANGE --no-merges --pretty='- %s' | head -n 30
+          echo
+          echo "### Install"
+          echo "Download **BitChord-v${VERSION}.apk** below (arm64 phones, Android 14 or newer) and install it over the previous version, or use the in-app update prompt."
+        } > release-notes.md
+        gh release create "v${VERSION}" "build-output/BitChord-v${VERSION}.apk" \
+          --target "$GITHUB_SHA" \
+          --title "BitChord v${VERSION}" \
+          --notes-file release-notes.md \
+          --latest

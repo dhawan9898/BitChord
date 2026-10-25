@@ -43,7 +43,7 @@ object AppUpdateChecker {
     private const val CACHE_SUBDIR = "updates"
 
     private const val LATEST_RELEASE_URL =
-        "https://api.github.com/repos/kushagrasinghx/BitChord/releases/latest"
+        "https://api.github.com/repos/dhawan9898/BitChord/releases/latest"
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -94,11 +94,14 @@ object AppUpdateChecker {
     }
 
     /**
-     * One release carries the phone app and the TV app, each as a universal
-     * APK plus per-ABI splits:
+     * A release carries one phone APK, `BitChord-v1.8.1.57.apk` (arm64 only,
+     * no ABI suffix). The older layout - a universal APK plus per-ABI splits,
+     * and a TV app beside them:
      *
      *     BitChord-v1.8.apk     BitChord-v1.8_arm64-v8a.apk     ...
      *     BitChordTV-v1.8.apk   BitChordTV-v1.8_arm64-v8a.apk   ...
+     *
+     * is still understood.
      *
      * so this app's APKs are the ones named with its own
      * [BuildConfig.UPDATE_APK_PREFIX] — "BitChord-" never matches a TV file,
