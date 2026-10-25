@@ -91,7 +91,11 @@ android {
             isEnable = true
             reset()
             include("armeabi-v7a", "arm64-v8a", "x86_64")
-            isUniversalApk = true
+            // One APK per CPU, not a universal one: a universal APK carries the
+            // ONNX, FFmpeg and analyzer native libraries for all three ABIs (most
+            // of its size) when a device only ever loads one. The in-app updater
+            // already picks the `_<abi>` asset matching the device.
+            isUniversalApk = false
         }
     }
 
@@ -165,6 +169,9 @@ android {
              * `benchmark` build type below before it ships.
              */
             isMinifyEnabled = true
+            // Drops resources nothing references (unused strings, drawables and
+            // layouts pulled in by libraries). Needs minify, which is on above.
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
