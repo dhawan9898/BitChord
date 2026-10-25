@@ -722,15 +722,13 @@ internal fun ellipsised(text: String, paint: Paint, width: Float): String {
  * The app's own face, on a canvas.
  *
  * The poster is the one thing from this app that ends up somewhere else, so it
- * has more reason than any screen to be set in the type the app is set in.
- * Falls back to the platform sans if a weight can't be loaded, which keeps a
- * missing font resource a slightly plainer picture rather than a crash on the
- * share button.
+ * is set in the same face as the screens: the device's sans-serif at the same
+ * weights the type scale uses.
  */
-internal class Fonts(context: Context) {
-    private val heavy = font(context, R.font.sf_pro_display_heavy) ?: Typeface.DEFAULT_BOLD
-    private val semibold = font(context, R.font.sf_pro_display_semibold) ?: Typeface.DEFAULT_BOLD
-    private val regular = font(context, R.font.sf_pro_display_regular) ?: Typeface.DEFAULT
+internal class Fonts(@Suppress("UNUSED_PARAMETER") context: Context) {
+    private val heavy = Typeface.create(Typeface.DEFAULT, 800, false)
+    private val semibold = Typeface.create(Typeface.DEFAULT, 600, false)
+    private val regular = Typeface.create(Typeface.DEFAULT, 400, false)
 
     fun heading(size: Float, color: Int) = paint(heavy, size, color)
 
@@ -746,9 +744,6 @@ internal class Fonts(context: Context) {
             textSize = size
             this.color = color
         }
-
-    private fun font(context: Context, id: Int): Typeface? =
-        runCatching { ResourcesCompat.getFont(context, id) }.getOrNull()
 }
 
 internal suspend fun loadBitmap(context: Context, url: String): Bitmap? = runCatching {

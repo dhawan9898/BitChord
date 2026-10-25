@@ -63,10 +63,14 @@ android {
 
     defaultConfig {
         applicationId = "com.music.bitchord"
-        // 26 keeps reach wide; real-time blur (RenderEffect) kicks in on API 31+,
-        // Haze falls back to a translucent scrim below that.
-        minSdk = 26
+        // 34 = Android 14, what the Galaxy S24 Ultra shipped with. R8 drops every
+        // `SDK_INT >= ...` branch and fallback below it.
+        minSdk = 34
         targetSdk = 36
+
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
         versionCode = rootProject.extra["bitchordVersionCode"] as Int
         versionName = rootProject.extra["bitchordVersionName"] as String
 
@@ -86,18 +90,11 @@ android {
         buildConfigField("String", "UPDATE_APK_PREFIX", "\"BitChord-\"")
     }
 
-    splits {
-        abi {
-            isEnable = true
-            reset()
-            include("armeabi-v7a", "arm64-v8a", "x86_64")
-            // One APK per CPU, not a universal one: a universal APK carries the
-            // ONNX, FFmpeg and analyzer native libraries for all three ABIs (most
-            // of its size) when a device only ever loads one. The in-app updater
-            // already picks the `_<abi>` asset matching the device.
-            isUniversalApk = false
-        }
-    }
+    // One APK, for one phone: a Galaxy S24 Ultra is arm64-v8a only. The ONNX,
+    // FFmpeg and analyzer native libraries are built and packaged for that ABI
+    // alone, rather than three ABIs (or three plus a universal APK).
+    // Note: the in-app updater matches `_arm64-v8a` or an ABI-less asset name,
+    // and this build produces one ABI-less APK.
 
     // The phone <-> watch protocol, one file shared with the watch app so the
     // two cannot drift. See wearos/protocol/.../WearProtocol.kt.
