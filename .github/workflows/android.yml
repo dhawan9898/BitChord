@@ -87,6 +87,14 @@ jobs:
         cp "${APKS[0]}" "build-output/BitChord-v${VERSION}.apk"
         ls -lh build-output
 
+    # Where the APK's bytes are (native libraries, code, models, the embedded
+    # watch app, resources), in the run summary and the log, so size work is
+    # driven by numbers.
+    - name: APK size report
+      run: |
+        python3 .github/scripts/apk_size_report.py "build-output/BitChord-v${VERSION}.apk" 30 | tee size-report.md
+        cat size-report.md >> "$GITHUB_STEP_SUMMARY"
+
     - name: Upload APK Artifact
       uses: actions/upload-artifact@v4
       with:
